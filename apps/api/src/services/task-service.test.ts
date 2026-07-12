@@ -36,6 +36,8 @@ import { publishEvent } from "./event-bus.js";
 import {
   StateRaceError,
   createTask,
+  createTaskIdempotent,
+  getTaskByAgenticosIdempotencyKey,
   transitionTask,
   tryTransitionTask,
   updateTaskPr,
@@ -240,5 +242,116 @@ describe("searchTasks", () => {
     await searchTasks({});
     // limit(51) = default 50 + 1
     expect(mockDb.limit).toHaveBeenCalledWith(51);
+  });
+});
+
+describe("agenticos idempotency", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("stores AgenticOS idempotency key and payload hash on task create", async () => {
+    const mockTask = {
+      id: "task-1",
+      title: "Test",
+      state: "pending",
+      agenticosIdempotencyKey: "agenticos:run:task",
+    };
+    vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
+      [mockTask] as any,
+    );
+
+    await createTask({
+      title: "Test",
+      prompt: "Do",
+      repoUrl: "https://github.com/o/r",
+      agentType: "codex",
+      agenticosIdempotencyKey: "agenticos:run:task",
+      agenticosPayloadHash: "abc123",
+    } as any);
+
+    expect(db.insert(undefined as any).values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agenticosIdempotencyKey: "agenticos:run:task",
+        agenticosPayloadHash: "abc123",
+      }),
+    );
+  });
+});
+
+describe("createTaskIdempotent", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns existing task for duplicate exact AgenticOS payload", async () => {
+    const existing = {
+      id: "task-existing",
+      title: "Test",
+      state: "queued",
+      workspaceId: null,
+      agenticosIdempotencyKey: "agenticos:run:task",
+      agenticosPayloadHash: "placeholder",
+    };
+    const input = {
+      title: "Test",
+      prompt: "Do",
+      repoUrl: "https://github.com/o/r",
+      agentType: "codex",
+      agenticosIdempotencyKey: "agenticos:run:task",
+      workspaceId: null,
+    } as any;
+    const { canonicalAgenticosTaskHash } = await import("./agenticos-idempotency.js");
+    existing.agenticosPayloadHash = canonicalAgenticosTaskHash(input);
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([existing]);
+
+    const result = await createTaskIdempotent(input);
+
+    expect(result.created).toBe(false);
+    expect(result.task.id).toBe("task-existing");
+    expect(db.insert).not.toHaveBeenCalledWith(expect.objectContaining({ id: "should-not" }));
+  });
+
+  it("collapses concurrent duplicate insert unique violation to existing task", async () => {
+    const input = {
+      title: "Test",
+      prompt: "Do",
+      repoUrl: "https://github.com/o/r",
+      agentType: "codex",
+      agenticosIdempotencyKey: "agenticos:run:task",
+      workspaceId: null,
+    } as any;
+    const { canonicalAgenticosTaskHash } = await import("./agenticos-idempotency.js");
+    const hash = canonicalAgenticosTaskHash(input);
+    vi.mocked(db.select().from(undefined as any).where)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "task-existing", agenticosPayloadHash: hash }]);
+    vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockRejectedValueOnce(
+      {
+        code: "23505",
+        constraint: "tasks_agenticos_workspace_key_unique_idx",
+      },
+    );
+
+    const result = await createTaskIdempotent(input);
+
+    expect(result.created).toBe(false);
+    expect(result.task.id).toBe("task-existing");
+  });
+
+  it("rejects duplicate AgenticOS key with different payload", async () => {
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([
+      {
+        id: "task-existing",
+        agenticosPayloadHash: "different",
+      },
+    ]);
+
+    await expect(
+      createTaskIdempotent({
+        title: "Test",
+        prompt: "Do",
+        repoUrl: "https://github.com/o/r",
+        agentType: "codex",
+        agenticosIdempotencyKey: "agenticos:run:task",
+        workspaceId: null,
+      } as any),
+    ).rejects.toThrow(/different payload/i);
   });
 });

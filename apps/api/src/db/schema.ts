@@ -10,7 +10,9 @@ import {
   customType,
   unique,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
 
@@ -105,6 +107,11 @@ export const tasks = pgTable(
     ticketSource: text("ticket_source"),
     ticketExternalId: text("ticket_external_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    agenticosIdempotencyKey: text("agenticos_idempotency_key"),
+    agenticosPayloadHash: text("agenticos_payload_hash"),
+    agenticosDispatchCompletedAt: timestamp("agenticos_dispatch_completed_at", {
+      withTimezone: true,
+    }),
     retryCount: integer("retry_count").notNull().default(0),
     maxRetries: integer("max_retries").notNull().default(3),
     priority: integer("priority").notNull().default(100), // lower = higher priority
@@ -128,6 +135,10 @@ export const tasks = pgTable(
     index("tasks_parent_task_id_idx").on(table.parentTaskId),
     index("tasks_created_at_idx").on(table.createdAt.desc()),
     index("tasks_workspace_id_idx").on(table.workspaceId),
+    index("tasks_agenticos_idempotency_key_idx").on(table.agenticosIdempotencyKey),
+    uniqueIndex("tasks_agenticos_workspace_key_unique_idx")
+      .on(sql`COALESCE(${table.workspaceId}::text, '')`, table.agenticosIdempotencyKey)
+      .where(sql`${table.agenticosIdempotencyKey} IS NOT NULL`),
   ],
 );
 

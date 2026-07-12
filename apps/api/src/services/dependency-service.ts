@@ -9,7 +9,11 @@ import { logger } from "../logger.js";
 /**
  * Add dependencies for a task. Validates no cycles would be introduced.
  */
-export async function addDependencies(taskId: string, dependsOnIds: string[]): Promise<void> {
+export async function addDependencies(
+  taskId: string,
+  dependsOnIds: string[],
+  opts?: { idempotent?: boolean },
+): Promise<void> {
   if (dependsOnIds.length === 0) return;
 
   // Validate no self-dependency
@@ -43,12 +47,17 @@ export async function addDependencies(taskId: string, dependsOnIds: string[]): P
   }
 
   // Insert dependency rows
-  await db.insert(taskDependencies).values(
+  const insert = db.insert(taskDependencies).values(
     dependsOnIds.map((depId) => ({
       taskId,
       dependsOnTaskId: depId,
     })),
   );
+  if (opts?.idempotent) {
+    await insert.onConflictDoNothing();
+  } else {
+    await insert;
+  }
 }
 
 /**

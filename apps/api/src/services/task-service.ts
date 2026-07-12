@@ -1,10 +1,14 @@
-import { eq, desc, and, or, ilike, gte, lte, sql } from "drizzle-orm";
+import { eq, desc, and, or, ilike, gte, lte, sql, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, taskLogs, users } from "../db/schema.js";
 import { TaskState, transition, normalizeRepoUrl, type CreateTaskInput } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 import { enqueueWebhookEvent } from "../workers/webhook-worker.js";
+import {
+  AgenticosIdempotencyConflictError,
+  canonicalAgenticosTaskHash,
+} from "./agenticos-idempotency.js";
 import type { WebhookEvent } from "./webhook-service.js";
 
 /**
@@ -24,7 +28,14 @@ export class StateRaceError extends Error {
   }
 }
 
-export async function createTask(input: CreateTaskInput & { workspaceId?: string | null }) {
+export async function createTask(
+  input: CreateTaskInput & {
+    workspaceId?: string | null;
+    agenticosIdempotencyKey?: string;
+    agenticosPayloadHash?: string;
+    agenticosDispatchCompletedAt?: Date | null;
+  },
+) {
   const [task] = await db
     .insert(tasks)
     .values({
@@ -36,6 +47,9 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
       ticketSource: input.ticketSource,
       ticketExternalId: input.ticketExternalId,
       metadata: input.metadata,
+      agenticosIdempotencyKey: input.agenticosIdempotencyKey,
+      agenticosPayloadHash: input.agenticosPayloadHash,
+      agenticosDispatchCompletedAt: input.agenticosDispatchCompletedAt,
       maxRetries: input.maxRetries ?? 3,
       priority: input.priority ?? 100,
       workspaceId: input.workspaceId ?? undefined,
@@ -50,6 +64,83 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
   });
 
   return task;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: unknown; constraint?: unknown; message?: unknown };
+  return (
+    e.code === "23505" ||
+    e.constraint === "tasks_agenticos_workspace_key_unique_idx" ||
+    (typeof e.message === "string" &&
+      e.message.includes("tasks_agenticos_workspace_key_unique_idx"))
+  );
+}
+
+export async function getTaskByAgenticosIdempotencyKey(key: string, workspaceId?: string | null) {
+  const conditions = [eq(tasks.agenticosIdempotencyKey, key)];
+  conditions.push(workspaceId ? eq(tasks.workspaceId, workspaceId) : isNull(tasks.workspaceId));
+  const [task] = await db
+    .select()
+    .from(tasks)
+    .where(and(...conditions));
+  return task ?? null;
+}
+
+export function isAgenticosDispatchComplete(task: {
+  agenticosDispatchCompletedAt?: Date | string | null;
+}): boolean {
+  return !!task.agenticosDispatchCompletedAt;
+}
+
+export async function markAgenticosDispatchCompleted(taskId: string) {
+  const [task] = await db
+    .update(tasks)
+    .set({ agenticosDispatchCompletedAt: new Date() })
+    .where(eq(tasks.id, taskId))
+    .returning();
+  if (!task || !task.agenticosDispatchCompletedAt) {
+    throw new Error("AgenticOS dispatch completion marker was not persisted");
+  }
+  return task;
+}
+
+export async function createTaskIdempotent(
+  input: CreateTaskInput & { workspaceId?: string | null; agenticosIdempotencyKey?: string },
+) {
+  if (!input.agenticosIdempotencyKey) {
+    return { task: await createTask(input), created: true };
+  }
+
+  const agenticosPayloadHash = canonicalAgenticosTaskHash(input);
+  const existing = await getTaskByAgenticosIdempotencyKey(
+    input.agenticosIdempotencyKey,
+    input.workspaceId ?? null,
+  );
+  if (existing) {
+    if (existing.agenticosPayloadHash !== agenticosPayloadHash) {
+      throw new AgenticosIdempotencyConflictError();
+    }
+    return { task: existing, created: false };
+  }
+
+  try {
+    return {
+      task: await createTask({ ...input, agenticosPayloadHash }),
+      created: true,
+    };
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    const raced = await getTaskByAgenticosIdempotencyKey(
+      input.agenticosIdempotencyKey,
+      input.workspaceId ?? null,
+    );
+    if (!raced) throw err;
+    if (raced.agenticosPayloadHash !== agenticosPayloadHash) {
+      throw new AgenticosIdempotencyConflictError();
+    }
+    return { task: raced, created: false };
+  }
 }
 
 export async function getTask(id: string) {

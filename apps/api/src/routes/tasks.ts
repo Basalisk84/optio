@@ -7,6 +7,10 @@ import * as dependencyService from "../services/dependency-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
+import {
+  AgenticosIdempotencyConflictError,
+  extractAgenticosIdempotencyKey,
+} from "../services/agenticos-idempotency.js";
 
 const createTaskSchema = z.object({
   title: z.string().min(1),
@@ -20,6 +24,7 @@ const createTaskSchema = z.object({
   maxRetries: z.number().int().min(0).max(10).optional(),
   priority: z.number().int().min(1).max(1000).optional(),
   dependsOn: z.array(z.string().uuid()).optional(),
+  agenticosIdempotencyKey: z.string().optional(),
 });
 
 export async function taskRoutes(app: FastifyInstance) {
@@ -59,6 +64,17 @@ export async function taskRoutes(app: FastifyInstance) {
     reply.send(result);
   });
 
+  // Lookup task by AgenticOS idempotency key for dispatch reconciliation
+  app.get("/api/tasks/by-idempotency/:key", async (req, reply) => {
+    const { key } = req.params as { key: string };
+    const task = await taskService.getTaskByAgenticosIdempotencyKey(
+      key,
+      req.user?.workspaceId ?? null,
+    );
+    if (!task) return reply.status(404).send({ error: "Task not found" });
+    reply.send({ task });
+  });
+
   // Get task (enriched with pendingReason and pipelineProgress)
   app.get("/api/tasks/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -88,54 +104,102 @@ export async function taskRoutes(app: FastifyInstance) {
   app.post("/api/tasks", async (req, reply) => {
     const input = createTaskSchema.parse(req.body);
     const { dependsOn, ...taskInput } = input;
-    const task = await taskService.createTask({
-      ...taskInput,
-      workspaceId: req.user?.workspaceId ?? null,
-    });
+    let agenticosIdempotencyKey: string | undefined;
+    try {
+      agenticosIdempotencyKey = extractAgenticosIdempotencyKey({
+        headers: req.headers as Record<string, unknown>,
+        body: req.body,
+      });
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
 
-    // Set up dependencies if specified
+    let idempotentCreate;
+    try {
+      idempotentCreate = await taskService.createTaskIdempotent({
+        ...taskInput,
+        dependsOn,
+        agenticosIdempotencyKey,
+        workspaceId: req.user?.workspaceId ?? null,
+      });
+    } catch (err) {
+      if (err instanceof AgenticosIdempotencyConflictError) {
+        return reply.status(409).send({ error: err.message });
+      }
+      throw err;
+    }
+    const task = idempotentCreate.task;
+    if (!idempotentCreate.created && taskService.isAgenticosDispatchComplete(task)) {
+      return reply.status(200).send({ task, idempotent: true });
+    }
+
+    // Set up dependencies if specified; idempotent retries resume this block until completion is marked.
     const hasDeps = dependsOn && dependsOn.length > 0;
+    const state = task.state as TaskState | undefined;
+
     if (hasDeps) {
-      try {
-        await dependencyService.addDependencies(task.id, dependsOn);
-      } catch (err) {
-        // Clean up the task if dependency setup fails
-        reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
-        return;
+      if (!state || state === TaskState.PENDING || state === TaskState.WAITING_ON_DEPS) {
+        try {
+          if (agenticosIdempotencyKey) {
+            await dependencyService.addDependencies(task.id, dependsOn, { idempotent: true });
+          } else {
+            await dependencyService.addDependencies(task.id, dependsOn);
+          }
+        } catch (err) {
+          // Clean up the task if dependency setup fails
+          reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+      }
+
+      // Task has dependencies — transition only from pending; later states prove dependency dispatch progressed.
+      if (!state || state === TaskState.PENDING) {
+        await taskService.transitionTask(
+          task.id,
+          TaskState.WAITING_ON_DEPS,
+          "task_submitted_with_deps",
+          undefined,
+          req.user?.id,
+        );
+      }
+    } else {
+      // No dependencies — enqueue only until the worker has consumed/progressed the queued task.
+      if (!state || state === TaskState.PENDING) {
+        await taskService.transitionTask(
+          task.id,
+          TaskState.QUEUED,
+          "task_submitted",
+          undefined,
+          req.user?.id,
+        );
+      }
+      if (!state || state === TaskState.PENDING || state === TaskState.QUEUED) {
+        await taskQueue.add(
+          "process-task",
+          { taskId: task.id },
+          {
+            jobId: task.id,
+            priority: task.priority ?? 100,
+            attempts: task.maxRetries + 1,
+            backoff: { type: "exponential", delay: 5000 },
+          },
+        );
       }
     }
 
-    if (hasDeps) {
-      // Task has dependencies — put it in waiting_on_deps state
-      await taskService.transitionTask(
-        task.id,
-        TaskState.WAITING_ON_DEPS,
-        "task_submitted_with_deps",
-        undefined,
-        req.user?.id,
-      );
-    } else {
-      // No dependencies — enqueue immediately
-      await taskService.transitionTask(
-        task.id,
-        TaskState.QUEUED,
-        "task_submitted",
-        undefined,
-        req.user?.id,
-      );
-      await taskQueue.add(
-        "process-task",
-        { taskId: task.id },
-        {
-          jobId: task.id,
-          priority: task.priority ?? 100,
-          attempts: task.maxRetries + 1,
-          backoff: { type: "exponential", delay: 5000 },
-        },
-      );
+    const completedTask = agenticosIdempotencyKey
+      ? await taskService.markAgenticosDispatchCompleted(task.id)
+      : task;
+    if (agenticosIdempotencyKey && !completedTask?.agenticosDispatchCompletedAt) {
+      throw new Error("AgenticOS dispatch completion marker was not persisted");
     }
 
-    reply.status(201).send({ task });
+    if (!agenticosIdempotencyKey) {
+      return reply.status(201).send({ task: completedTask });
+    }
+    reply
+      .status(idempotentCreate.created ? 201 : 200)
+      .send({ task: completedTask, idempotent: !idempotentCreate.created });
   });
 
   // Cancel task
