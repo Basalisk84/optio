@@ -115,6 +115,9 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     podSpec.containers = [container];
     podSpec.restartPolicy = "Never";
     podSpec.volumes = volumes.length > 0 ? volumes : undefined;
+    podSpec.dnsConfig = {
+      options: [{ name: "ndots", value: "1" }],
+    };
 
     const metadata = new V1ObjectMeta();
     metadata.name = podName;
