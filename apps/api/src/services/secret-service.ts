@@ -5,6 +5,7 @@ import { secrets } from "../db/schema.js";
 import type { SecretRef } from "@optio/shared";
 
 const ALGORITHM = "aes-256-gcm";
+const RUNTIME_ENV_SECRET_ALLOWLIST = new Set(["GITHUB_TOKEN"]);
 
 function getEncryptionKey(): Buffer {
   const key = process.env.OPTIO_ENCRYPTION_KEY;
@@ -131,6 +132,12 @@ export async function resolveSecretsForTask(
 ): Promise<Record<string, string>> {
   const resolved: Record<string, string> = {};
   for (const name of requiredSecrets) {
+    const envValue = RUNTIME_ENV_SECRET_ALLOWLIST.has(name) ? process.env[name] : undefined;
+    if (envValue && envValue.trim().length > 0) {
+      resolved[name] = envValue;
+      continue;
+    }
+
     if (scope !== "global") {
       // Try repo-scoped secret first, fall back to global
       try {

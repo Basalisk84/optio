@@ -286,6 +286,64 @@ describe("secret-service", () => {
   });
 
   describe("resolveSecretsForTask", () => {
+    it("uses environment values before encrypted DB secrets", async () => {
+      const previous = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = "env-gh-token";
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockRejectedValue(new Error("DB should not be touched for env secret")),
+        }),
+      });
+
+      try {
+        const result = await resolveSecretsForTask(
+          ["GITHUB_TOKEN"],
+          "https://github.com/owner/repo",
+        );
+        expect(result.GITHUB_TOKEN).toBe("env-gh-token");
+        expect(db.select).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env.GITHUB_TOKEN;
+        else process.env.GITHUB_TOKEN = previous;
+      }
+    });
+
+    it("ignores blank allowed environment secret values", async () => {
+      const previous = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = "   ";
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+      });
+
+      try {
+        await expect(resolveSecretsForTask(["GITHUB_TOKEN"], "global")).rejects.toThrow(
+          "Secret not found: GITHUB_TOKEN",
+        );
+        expect(db.select).toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env.GITHUB_TOKEN;
+        else process.env.GITHUB_TOKEN = previous;
+      }
+    });
+
+    it("does not use unapproved environment variables as task secrets", async () => {
+      const previous = process.env.ANTHROPIC_API_KEY;
+      process.env.ANTHROPIC_API_KEY = "env-anthropic-token";
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+      });
+
+      try {
+        await expect(resolveSecretsForTask(["ANTHROPIC_API_KEY"], "global")).rejects.toThrow(
+          "Secret not found: ANTHROPIC_API_KEY",
+        );
+        expect(db.select).toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+        else process.env.ANTHROPIC_API_KEY = previous;
+      }
+    });
+
     it("falls back to global when repo-scoped secret is not found", async () => {
       let capturedGlobal: { encrypted: Buffer; iv: Buffer; authTag: Buffer };
 
