@@ -1,5 +1,59 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildAgentCommand, inferExitCode } from "./task-worker.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  buildAgentCommand,
+  inferExitCode,
+  normalizeClaudeAuthMode,
+  resolveClaudeAuthMode,
+  toAdapterClaudeAuthMode,
+} from "./task-worker.js";
+
+describe("resolveClaudeAuthMode", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env = { ...originalEnv };
+    delete process.env.OPTIO_AUTH_MODE;
+    delete process.env.CLAUDE_AUTH_MODE;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("normalizes supported configured auth modes", () => {
+    expect(normalizeClaudeAuthMode("api-key")).toBe("api-key");
+    expect(normalizeClaudeAuthMode("max-subscription")).toBe("max-subscription");
+    expect(normalizeClaudeAuthMode("oauth-token")).toBe("oauth-token");
+    expect(normalizeClaudeAuthMode("bad-mode")).toBeNull();
+  });
+
+  it("maps oauth-token to the adapter OAuth-compatible auth path", () => {
+    expect(toAdapterClaudeAuthMode("api-key")).toBe("api-key");
+    expect(toAdapterClaudeAuthMode("max-subscription")).toBe("max-subscription");
+    expect(toAdapterClaudeAuthMode("oauth-token")).toBe("max-subscription");
+  });
+
+  it("prefers OPTIO_AUTH_MODE over the secrets table", async () => {
+    process.env.OPTIO_AUTH_MODE = "max-subscription";
+    const retrieveModeSecret = vi.fn(async () => "api-key");
+
+    await expect(resolveClaudeAuthMode({ warn: vi.fn() }, retrieveModeSecret)).resolves.toBe(
+      "max-subscription",
+    );
+    expect(retrieveModeSecret).not.toHaveBeenCalled();
+  });
+
+  it("falls back to api-key when the optional DB auth mode secret cannot decrypt", async () => {
+    const warn = vi.fn();
+    const retrieveModeSecret = vi.fn(async () => {
+      throw new Error("Unsupported state or unable to authenticate data");
+    });
+
+    await expect(resolveClaudeAuthMode({ warn }, retrieveModeSecret)).resolves.toBe("api-key");
+    expect(warn).toHaveBeenCalledOnce();
+  });
+});
 
 describe("buildAgentCommand", () => {
   describe("claude-code agent", () => {

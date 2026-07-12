@@ -4,6 +4,7 @@ import { use, useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -21,9 +22,16 @@ import {
   ChevronDown,
   Bot,
 } from "lucide-react";
-import { SessionTerminal } from "@/components/session-terminal";
-import { SessionChat } from "@/components/session-chat";
 import { SplitPane } from "@/components/split-pane";
+
+const SessionTerminal = dynamic(
+  () => import("@/components/session-terminal").then((mod) => mod.SessionTerminal),
+  { ssr: false },
+);
+const SessionChat = dynamic(
+  () => import("@/components/session-chat").then((mod) => mod.SessionChat),
+  { ssr: false },
+);
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

@@ -7,6 +7,7 @@ import {
   TASK_FILE_PATH,
   DEFAULT_MAX_TURNS_CODING,
   DEFAULT_MAX_TURNS_REVIEW,
+  type ClaudeAuthMode as AdapterClaudeAuthMode,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
@@ -20,6 +21,38 @@ import { publishEvent } from "../services/event-bus.js";
 import { resolveSecretsForTask, retrieveSecret } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { logger } from "../logger.js";
+
+type ConfiguredClaudeAuthMode = AdapterClaudeAuthMode | "oauth-token";
+
+export function normalizeClaudeAuthMode(value: unknown): ConfiguredClaudeAuthMode | null {
+  if (value === "api-key" || value === "max-subscription" || value === "oauth-token") {
+    return value;
+  }
+  return null;
+}
+
+export function toAdapterClaudeAuthMode(mode: ConfiguredClaudeAuthMode): AdapterClaudeAuthMode {
+  return mode === "oauth-token" ? "max-subscription" : mode;
+}
+
+export async function resolveClaudeAuthMode(
+  log: { warn: (obj: unknown, msg: string) => void },
+  retrieveModeSecret: () => Promise<unknown> = () => retrieveSecret("CLAUDE_AUTH_MODE"),
+): Promise<ConfiguredClaudeAuthMode> {
+  const envMode = normalizeClaudeAuthMode(
+    process.env.OPTIO_AUTH_MODE ?? process.env.CLAUDE_AUTH_MODE,
+  );
+  if (envMode) return envMode;
+
+  try {
+    const secretMode = normalizeClaudeAuthMode(await retrieveModeSecret());
+    if (secretMode) return secretMode;
+  } catch (err) {
+    log.warn({ err }, "Unable to read optional CLAUDE_AUTH_MODE secret; falling back to api-key");
+  }
+
+  return "api-key";
+}
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 const connectionOpts = { url: redisUrl, maxRetriesPerRequest: null };
@@ -176,8 +209,7 @@ export function startTaskWorker() {
 
         // Get agent adapter and build config
         const adapter = getAdapter(task.agentType);
-        const claudeAuthMode =
-          ((await retrieveSecret("CLAUDE_AUTH_MODE").catch(() => null)) as any) ?? "api-key";
+        const claudeAuthMode = await resolveClaudeAuthMode(log);
         const optioApiUrl = `http://${process.env.API_HOST ?? "host.docker.internal"}:${process.env.API_PORT ?? "4000"}`;
 
         // Load and render prompt template
@@ -213,12 +245,14 @@ export function startTaskWorker() {
         const finalClaudeModel =
           reviewOverride?.claudeModel ?? repoConfig?.claudeModel ?? undefined;
 
+        const adapterClaudeAuthMode = toAdapterClaudeAuthMode(claudeAuthMode);
+
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
           prompt: task.prompt,
           repoUrl: task.repoUrl,
           repoBranch: task.repoBranch,
-          claudeAuthMode,
+          claudeAuthMode: adapterClaudeAuthMode,
           optioApiUrl,
           renderedPrompt: finalRenderedPrompt,
           taskFileContent: finalTaskFileContent,
@@ -292,24 +326,31 @@ export function startTaskWorker() {
 
         // For max-subscription mode, fetch the OAuth token from the auth proxy
         if (claudeAuthMode === "max-subscription") {
-          const { getClaudeAuthToken } = await import("../services/auth-service.js");
-          const authResult = getClaudeAuthToken();
-          if (authResult.available && authResult.token) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
-            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from host credentials");
+          if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+            allEnv.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from environment");
           } else {
-            throw new Error(
-              `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
-            );
+            const { getClaudeAuthToken } = await import("../services/auth-service.js");
+            const authResult = getClaudeAuthToken();
+            if (authResult.available && authResult.token) {
+              allEnv.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
+              log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from host credentials");
+            } else {
+              throw new Error(
+                `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
+              );
+            }
           }
         }
 
         // For oauth-token mode, read the token from the secrets store
         if (claudeAuthMode === "oauth-token") {
-          const oauthToken = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
+          const oauthToken =
+            process.env.CLAUDE_CODE_OAUTH_TOKEN ??
+            (await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null));
           if (oauthToken) {
             allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
-            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from secrets store");
+            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from configured token source");
           } else {
             throw new Error(
               "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found. " +

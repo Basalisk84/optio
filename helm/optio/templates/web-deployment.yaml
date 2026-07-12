@@ -11,6 +11,8 @@ spec:
   selector:
     matchLabels:
       app: optio-web
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -46,10 +48,17 @@ spec:
           ports:
             - containerPort: {{ .Values.web.port }}
           env:
+            {{- $webEnv := .Values.web.env | default dict }}
             - name: NEXT_PUBLIC_API_URL
-              value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
+              value: {{ get $webEnv "NEXT_PUBLIC_API_URL" | default (printf "http://%s-api:%v" .Release.Name .Values.api.port) | quote }}
             - name: NEXT_PUBLIC_WS_URL
-              value: "ws://{{ .Release.Name }}-api:{{ .Values.api.port }}"
+              value: {{ get $webEnv "NEXT_PUBLIC_WS_URL" | default (printf "ws://%s-api:%v" .Release.Name .Values.api.port) | quote }}
+            {{- range $name, $value := $webEnv }}
+            {{- if and (ne $name "NEXT_PUBLIC_API_URL") (ne $name "NEXT_PUBLIC_WS_URL") }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
 ---

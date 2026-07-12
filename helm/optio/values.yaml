@@ -50,6 +50,9 @@ web:
     limits:
       cpu: 500m
       memory: 512Mi
+  env:
+    NEXT_PUBLIC_API_URL: ""
+    NEXT_PUBLIC_WS_URL: ""
   # Pod anti-affinity (same options as api.antiAffinity)
   antiAffinity: soft
 
