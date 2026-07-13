@@ -158,6 +158,21 @@ export function resolveImage(imageConfig?: RepoImageConfig): string {
   return process.env.OPTIO_AGENT_IMAGE ?? DEFAULT_AGENT_IMAGE;
 }
 
+function shellSingleQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+export function buildEnvExports(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([key, value]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        throw new Error(`Invalid environment variable name: ${key}`);
+      }
+      return `export ${key}=${shellSingleQuote(value)}`;
+    })
+    .join("\n");
+}
+
 async function createRepoPod(
   repoUrl: string,
   repoBranch: string,
@@ -349,8 +364,7 @@ export async function execTaskInRepoPod(
     .where(eq(tasks.id, taskId));
 
   // Build the exec command
-  const envJson = JSON.stringify({ ...env, OPTIO_TASK_ID: taskId });
-  const envB64 = Buffer.from(envJson).toString("base64");
+  const envExports = buildEnvExports({ ...env, OPTIO_TASK_ID: taskId });
   const runToken = randomUUID();
 
   // Build worktree setup commands based on whether we're resetting or creating fresh
@@ -407,12 +421,7 @@ export async function execTaskInRepoPod(
   const script = [
     "set -e",
     "exec 2>&1",
-    `eval $(echo '${envB64}' | base64 -d | python3 -c "`,
-    `import json, sys, shlex`,
-    `env = json.load(sys.stdin)`,
-    `for k, v in env.items():`,
-    `    print(f'export {k}={shlex.quote(v)}')`,
-    `")`,
+    envExports,
     `echo "[optio] Waiting for repo to be ready..."`,
     `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: repo not ready after 120s"; exit 1; }`,

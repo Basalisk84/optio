@@ -125,6 +125,30 @@ describe("transitionTask", () => {
     );
   });
 
+  it("clears stale error fields when a PR is detected", async () => {
+    const task = {
+      id: "t1",
+      state: "running",
+      startedAt: null,
+      ticketSource: null,
+      errorMessage: "Exit code: 1",
+      resultSummary: "Agent exited with code 1",
+    };
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([task]);
+    vi.mocked(db as any).returning.mockResolvedValueOnce([
+      { ...task, state: "pr_opened", errorMessage: null, resultSummary: null },
+    ]);
+    vi.mocked(db.insert(undefined as any).values).mockResolvedValueOnce(undefined as any);
+
+    const result = await transitionTask("t1", TaskState.PR_OPENED, "pr_detected");
+
+    expect(db.update(undefined as any).set).toHaveBeenCalledWith(
+      expect.objectContaining({ errorMessage: null, resultSummary: null }),
+    );
+    expect(result.errorMessage).toBeNull();
+    expect(result.resultSummary).toBeNull();
+  });
+
   it("throws StateRaceError when atomic update returns 0 rows", async () => {
     const task = { id: "t1", state: "queued", startedAt: null };
     vi.mocked(db.select().from(undefined as any).where)

@@ -307,7 +307,7 @@ export async function transitionTask(
     updateFields.completedAt = new Date();
   }
   // Clear error fields on successful completion (PR merged after prior errors)
-  if (toState === TaskState.COMPLETED) {
+  if (toState === TaskState.COMPLETED || toState === TaskState.PR_OPENED) {
     updateFields.errorMessage = null;
     updateFields.resultSummary = null;
   }

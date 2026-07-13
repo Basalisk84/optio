@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
@@ -77,6 +81,7 @@ import {
   listRepoPods,
   reconcileActiveTaskCounts,
   deleteNetworkPolicy,
+  buildEnvExports,
 } from "./repo-pool-service.js";
 
 // ── resolveImage ────────────────────────────────────────────────────
@@ -141,6 +146,42 @@ describe("resolveImage", () => {
   it("falls through to default for invalid preset", () => {
     delete process.env.OPTIO_AGENT_IMAGE;
     expect(resolveImage({ preset: "nonexistent" as any })).toBe("optio-agent:latest");
+  });
+});
+
+// ── buildEnvExports ─────────────────────────────────────────────────
+
+describe("buildEnvExports", () => {
+  it("round-trips hostile prompt text without executing it as shell", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-env-"));
+    try {
+      const prompt = [
+        "1. Keep markdown `code` inert.",
+        "2. Do not expand $HOME.",
+        "3. Ignore branches named optio/task-* entirely.",
+        "4. Keep single quotes: don't execute me.",
+      ].join("\n");
+      const script = [
+        "set -euo pipefail",
+        buildEnvExports({ OPTIO_PROMPT: prompt, OPTIO_TASK_ID: "task-1" }),
+        `printf '%s' "$OPTIO_PROMPT" > ${join(dir, "prompt-out")}`,
+        `printf '%s' "$OPTIO_TASK_ID" > ${join(dir, "task-id-out")}`,
+      ].join("\n");
+
+      execFileSync("bash", ["-c", script], { cwd: dir });
+
+      expect(readFileSync(join(dir, "prompt-out"), "utf8")).toBe(prompt);
+      expect(readFileSync(join(dir, "task-id-out"), "utf8")).toBe("task-1");
+      expect(readdirSync(dir).sort()).toEqual(["prompt-out", "task-id-out"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid environment variable names", () => {
+    expect(() => buildEnvExports({ "BAD-NAME": "value" })).toThrow(
+      "Invalid environment variable name",
+    );
   });
 });
 
