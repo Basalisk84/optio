@@ -418,7 +418,7 @@ export async function execTaskInRepoPod(
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: repo not ready after 120s"; exit 1; }`,
     `echo "[optio] Repo ready"`,
     `ENV_FRESH="true"`,
-    `[ -f /home/agent/.optio-env-ready ] && ENV_FRESH="false"`,
+    '[ -f "${HOME:-/tmp/agent}/.optio-env-ready" ] && ENV_FRESH="false"',
     `export ENV_FRESH`,
     `if [ "$ENV_FRESH" = "true" ]; then echo "[optio] Fresh environment — tools may need to be installed"; else echo "[optio] Warm environment — tools from previous tasks should be available"; fi`,
     `echo "[optio] Acquiring repo lock..."`,
@@ -468,7 +468,7 @@ export async function execTaskInRepoPod(
     `set +e`,
     ...agentCommand,
     `AGENT_EXIT=$?`,
-    `[ $AGENT_EXIT -eq 0 ] && touch /home/agent/.optio-env-ready`,
+    '[ $AGENT_EXIT -eq 0 ] && touch "${HOME:-/tmp/agent}/.optio-env-ready"',
     `exit $AGENT_EXIT`,
   ].join("\n");
 

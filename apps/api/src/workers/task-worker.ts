@@ -877,8 +877,10 @@ export function buildAgentCommand(
           : env.OPTIO_AUTH_MODE === "host-claude"
             ? [
                 `mkdir -p "${env.HOME ?? "/tmp/agent"}"`,
-                `ln -sfn /optio-host-claude/.claude "${env.HOME ?? "/tmp/agent"}/.claude"`,
-                `ln -sfn /optio-host-claude/.claude.json "${env.HOME ?? "/tmp/agent"}/.claude.json"`,
+                `rm -rf "${env.HOME ?? "/tmp/agent"}/.claude" "${env.HOME ?? "/tmp/agent"}/.claude.json"`,
+                `cp -a /optio-host-claude/.claude "${env.HOME ?? "/tmp/agent"}/.claude"`,
+                `cp -a /optio-host-claude/.claude.json "${env.HOME ?? "/tmp/agent"}/.claude.json"`,
+                `chmod -R u+rwX "${env.HOME ?? "/tmp/agent"}/.claude" "${env.HOME ?? "/tmp/agent"}/.claude.json" 2>/dev/null || true`,
                 `unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true`,
               ]
             : [];
