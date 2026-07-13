@@ -25,7 +25,12 @@ import { logger } from "../logger.js";
 type ConfiguredClaudeAuthMode = AdapterClaudeAuthMode | "oauth-token";
 
 export function normalizeClaudeAuthMode(value: unknown): ConfiguredClaudeAuthMode | null {
-  if (value === "api-key" || value === "max-subscription" || value === "oauth-token") {
+  if (
+    value === "api-key" ||
+    value === "max-subscription" ||
+    value === "oauth-token" ||
+    value === "host-claude"
+  ) {
     return value;
   }
   return null;
@@ -322,6 +327,13 @@ export function startTaskWorker() {
         }
         if (repoConfig?.setupCommands) {
           allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
+        }
+
+        if (claudeAuthMode === "host-claude") {
+          allEnv.HOME = process.env.OPTIO_HOST_CLAUDE_CONTAINER_HOME ?? "/tmp/agent";
+          delete allEnv.CLAUDE_CODE_OAUTH_TOKEN;
+          delete allEnv.ANTHROPIC_API_KEY;
+          log.info("Using host-mounted Claude Code credentials");
         }
 
         // For max-subscription mode, fetch the OAuth token from the auth proxy
@@ -843,7 +855,14 @@ export function buildAgentCommand(
               `if curl -sf "${env.OPTIO_API_URL}/api/auth/claude-token" > /dev/null 2>&1; then echo "[optio] Token proxy OK"; fi`,
               `unset ANTHROPIC_API_KEY 2>/dev/null || true`,
             ]
-          : [];
+          : env.OPTIO_AUTH_MODE === "host-claude"
+            ? [
+                `mkdir -p "${env.HOME ?? "/tmp/agent"}"`,
+                `ln -sfn /optio-host-claude/.claude "${env.HOME ?? "/tmp/agent"}/.claude"`,
+                `ln -sfn /optio-host-claude/.claude.json "${env.HOME ?? "/tmp/agent"}/.claude.json"`,
+                `unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true`,
+              ]
+            : [];
 
       const resumeFlag = opts?.resumeSessionId
         ? `--resume ${JSON.stringify(opts.resumeSessionId)}`

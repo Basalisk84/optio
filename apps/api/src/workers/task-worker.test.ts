@@ -25,6 +25,7 @@ describe("resolveClaudeAuthMode", () => {
     expect(normalizeClaudeAuthMode("api-key")).toBe("api-key");
     expect(normalizeClaudeAuthMode("max-subscription")).toBe("max-subscription");
     expect(normalizeClaudeAuthMode("oauth-token")).toBe("oauth-token");
+    expect(normalizeClaudeAuthMode("host-claude")).toBe("host-claude");
     expect(normalizeClaudeAuthMode("bad-mode")).toBeNull();
   });
 
@@ -32,6 +33,7 @@ describe("resolveClaudeAuthMode", () => {
     expect(toAdapterClaudeAuthMode("api-key")).toBe("api-key");
     expect(toAdapterClaudeAuthMode("max-subscription")).toBe("max-subscription");
     expect(toAdapterClaudeAuthMode("oauth-token")).toBe("max-subscription");
+    expect(toAdapterClaudeAuthMode("host-claude")).toBe("host-claude");
   });
 
   it("prefers OPTIO_AUTH_MODE over the secrets table", async () => {
@@ -129,6 +131,18 @@ describe("buildAgentCommand", () => {
       const cmds = buildAgentCommand("claude-code", env);
       expect(cmds.some((c) => c.includes("Token proxy OK"))).toBe(false);
       expect(cmds.some((c) => c.includes("unset ANTHROPIC_API_KEY"))).toBe(false);
+    });
+
+    it("links host-mounted Claude config without token env in host-claude mode", () => {
+      const env = {
+        OPTIO_PROMPT: "Do work",
+        OPTIO_AUTH_MODE: "host-claude",
+        HOME: "/tmp/agent",
+      };
+      const cmds = buildAgentCommand("claude-code", env);
+      expect(cmds.some((c) => c.includes("/optio-host-claude/.claude"))).toBe(true);
+      expect(cmds.some((c) => c.includes("CLAUDE_CODE_OAUTH_TOKEN"))).toBe(true);
+      expect(cmds.some((c) => c.includes("Token proxy OK"))).toBe(false);
     });
 
     it("includes review label in echo when isReview is true", () => {

@@ -76,6 +76,12 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     container.resources = resources;
     container.stdin = true;
     container.tty = true;
+    if (spec.runAsUser !== undefined || spec.runAsGroup !== undefined) {
+      container.securityContext = {
+        runAsUser: spec.runAsUser,
+        runAsGroup: spec.runAsGroup,
+      };
+    }
 
     // Build volumes and volume mounts
     const volumes: V1Volume[] = [];

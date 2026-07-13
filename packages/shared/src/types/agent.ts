@@ -1,4 +1,4 @@
-export type ClaudeAuthMode = "api-key" | "max-subscription";
+export type ClaudeAuthMode = "api-key" | "max-subscription" | "host-claude";
 
 export interface AgentTaskInput {
   taskId: string;

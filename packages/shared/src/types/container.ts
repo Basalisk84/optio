@@ -9,6 +9,8 @@ export interface ContainerSpec {
   volumes?: VolumeMount[];
   networkMode?: string;
   imagePullPolicy?: "Always" | "Never" | "IfNotPresent";
+  runAsUser?: number;
+  runAsGroup?: number;
   /** Optional pod name override. If not set, the runtime generates one. */
   name?: string;
 }

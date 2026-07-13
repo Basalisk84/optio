@@ -33,7 +33,8 @@ RUN apt-get update && apt-get install -y python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Workspace + Optio scripts
-RUN mkdir -p /workspace /opt/optio
+RUN mkdir -p /workspace /opt/optio \
+    && chmod 1777 /workspace
 COPY scripts/agent-entrypoint.sh /opt/optio/entrypoint.sh
 COPY scripts/repo-init.sh /opt/optio/repo-init.sh
 RUN chmod +x /opt/optio/entrypoint.sh /opt/optio/repo-init.sh

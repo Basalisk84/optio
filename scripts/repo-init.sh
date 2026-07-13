@@ -4,6 +4,9 @@ set -euo pipefail
 echo "[optio] Initializing repo pod"
 echo "[optio] Repo: ${OPTIO_REPO_URL} (branch: ${OPTIO_REPO_BRANCH})"
 
+# Ensure HOME is writable when the pod runs under a host-mapped UID.
+mkdir -p "${HOME:-/home/agent}"
+
 # Configure git
 git config --global user.name "Optio Agent"
 git config --global user.email "optio-agent@noreply.github.com"

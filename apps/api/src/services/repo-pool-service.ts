@@ -212,9 +212,26 @@ spec:
 
   try {
     const podName = generateRepoPodName(repoUrl);
-    const volumes = pvcReady
+    const volumes: NonNullable<ContainerSpec["volumes"]> = pvcReady
       ? [{ persistentVolumeClaim: pvcName, mountPath: "/home/agent" }]
-      : undefined;
+      : [];
+
+    const useHostClaude = env.OPTIO_AUTH_MODE === "host-claude";
+    if (useHostClaude) {
+      volumes.push(
+        {
+          hostPath: process.env.OPTIO_HOST_CLAUDE_DIR ?? "/home/basalisk/.claude",
+          mountPath: "/optio-host-claude/.claude",
+          readOnly: true,
+        },
+        {
+          hostPath: process.env.OPTIO_HOST_CLAUDE_CONFIG ?? "/home/basalisk/.claude.json",
+          mountPath: "/optio-host-claude/.claude.json",
+          readOnly: true,
+        },
+      );
+    }
+
     const spec: ContainerSpec = {
       name: podName,
       image,
@@ -226,7 +243,9 @@ spec:
       },
       workDir: "/workspace",
       imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
-      volumes,
+      volumes: volumes.length > 0 ? volumes : undefined,
+      runAsUser: useHostClaude ? Number(process.env.OPTIO_HOST_CLAUDE_UID ?? "1000") : undefined,
+      runAsGroup: useHostClaude ? Number(process.env.OPTIO_HOST_CLAUDE_GID ?? "1000") : undefined,
       labels: {
         "optio.repo-url": repoUrl.replace(/[^a-zA-Z0-9-_.]/g, "_").slice(0, 63),
         "optio.type": "repo-pod",
