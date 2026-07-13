@@ -929,6 +929,9 @@ export function inferExitCode(agentType: string, logs: string): number {
       const hasResultError = logs.includes('"is_error":true');
       const hasFatalError =
         logs.includes("fatal:") ||
+        logs.includes("Traceback (most recent call last):") ||
+        logs.includes("PermissionError:") ||
+        logs.includes("command not found") ||
         logs.includes("Error: authentication_failed") ||
         logs.includes("exit 1");
       return hasResultError || hasFatalError ? 1 : 0;

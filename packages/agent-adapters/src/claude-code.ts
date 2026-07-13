@@ -66,10 +66,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (input.claudeEffort) {
       claudeSettings.effortLevel = input.claudeEffort;
     }
-    setupFiles.push({
-      path: "/home/agent/.claude/settings.json",
-      content: JSON.stringify(claudeSettings),
-    });
+    if (authMode !== "host-claude") {
+      setupFiles.push({
+        path: "/home/agent/.claude/settings.json",
+        content: JSON.stringify(claudeSettings),
+      });
+    }
 
     return {
       command: ["/opt/optio/entrypoint.sh"],
