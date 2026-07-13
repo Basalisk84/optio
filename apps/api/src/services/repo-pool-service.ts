@@ -406,6 +406,7 @@ export async function execTaskInRepoPod(
 
   const script = [
     "set -e",
+    "exec 2>&1",
     `eval $(echo '${envB64}' | base64 -d | python3 -c "`,
     `import json, sys, shlex`,
     `env = json.load(sys.stdin)`,

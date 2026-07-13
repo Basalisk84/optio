@@ -80,6 +80,14 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   }
 
   parseResult(exitCode: number, logs: string): AgentResult {
+    if (!logs.trim()) {
+      return {
+        success: false,
+        summary: "Agent produced no output",
+        error: "Agent process exited without producing any output",
+      };
+    }
+
     const prMatch = logs.match(/https:\/\/github\.com\/[^\s"]+\/pull\/\d+/);
     const costMatch = logs.match(/"total_cost_usd":\s*([\d.]+)/);
 

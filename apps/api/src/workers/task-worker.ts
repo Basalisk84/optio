@@ -655,7 +655,26 @@ export function startTaskWorker() {
             // image pull in progress, node scaling up).
             if (currentTask.state === "provisioning") {
               const errStr = String(err);
-              log.warn({ err: errStr }, "Pod provisioning failed, re-queuing task");
+              const retryCount = currentTask.retryCount ?? 0;
+              const maxRetries = currentTask.maxRetries ?? 0;
+              if (retryCount >= maxRetries) {
+                log.warn(
+                  { err: errStr, retryCount, maxRetries },
+                  "Pod provisioning failed and retry limit reached",
+                );
+                await taskService.updateTaskResult(taskId, undefined, errStr);
+                await taskService.transitionTask(
+                  taskId,
+                  TaskState.FAILED,
+                  "provisioning_failed",
+                  errStr,
+                );
+                return;
+              }
+              log.warn(
+                { err: errStr, retryCount, maxRetries },
+                "Pod provisioning failed, re-queuing task",
+              );
               await taskService.updateTaskResult(taskId, undefined, errStr);
               await taskService.transitionTask(
                 taskId,
@@ -864,19 +883,13 @@ export function buildAgentCommand(
               ]
             : [];
 
-      const resumeFlag = opts?.resumeSessionId
-        ? `--resume ${JSON.stringify(opts.resumeSessionId)}`
+      const resumeArg = opts?.resumeSessionId
+        ? ` --resume ${JSON.stringify(opts.resumeSessionId)}`
         : "";
-
       return [
         ...authSetup,
         `echo "[optio] Running Claude Code${opts?.isReview ? " (review)" : ""}..."`,
-        `claude -p ${JSON.stringify(prompt)} \\`,
-        `  --dangerously-skip-permissions \\`,
-        `  --output-format stream-json \\`,
-        `  --verbose \\`,
-        `  --max-turns ${maxTurns} \\`,
-        `  ${resumeFlag}`.trim(),
+        `claude -p ${JSON.stringify(prompt)} --dangerously-skip-permissions --output-format stream-json --verbose --max-turns ${maxTurns}${resumeArg}`,
       ];
     }
     case "codex":
