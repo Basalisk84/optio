@@ -848,6 +848,10 @@ export async function reconcileOrphanedTasks() {
   }
 }
 
+function shellSingleQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
 export function buildAgentCommand(
   agentType: string,
   env: Record<string, string>,
@@ -886,18 +890,18 @@ export function buildAgentCommand(
             : [];
 
       const resumeArg = opts?.resumeSessionId
-        ? ` --resume ${JSON.stringify(opts.resumeSessionId)}`
+        ? ` --resume ${shellSingleQuote(opts.resumeSessionId)}`
         : "";
       return [
         ...authSetup,
         `echo "[optio] Running Claude Code${opts?.isReview ? " (review)" : ""}..."`,
-        `claude -p ${JSON.stringify(prompt)} --dangerously-skip-permissions --output-format stream-json --verbose --max-turns ${maxTurns}${resumeArg}`,
+        `claude -p ${shellSingleQuote(prompt)} --dangerously-skip-permissions --output-format stream-json --verbose --max-turns ${maxTurns}${resumeArg}`,
       ];
     }
     case "codex":
       return [
         `echo "[optio] Running OpenAI Codex..."`,
-        `codex exec --full-auto ${JSON.stringify(prompt)} --json`,
+        `codex exec --full-auto ${shellSingleQuote(prompt)} --json`,
       ];
     default:
       return [`echo "Unknown agent type: ${agentType}" && exit 1`];

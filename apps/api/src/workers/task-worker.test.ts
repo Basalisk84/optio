@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildAgentCommand,
   inferExitCode,
@@ -68,6 +72,41 @@ describe("buildAgentCommand", () => {
       expect(cmds.some((c) => c.includes("--output-format stream-json"))).toBe(true);
       expect(cmds.some((c) => c.includes("--verbose"))).toBe(true);
       expect(cmds.some((c) => c.includes("--max-turns 250"))).toBe(true);
+    });
+
+    it("passes hostile prompt text to claude without shell execution", () => {
+      const dir = mkdtempSync(join(tmpdir(), "optio-claude-command-"));
+      try {
+        const prompt = [
+          "literal backticks: `echo should-not-run`",
+          "literal dollar: $HOME",
+          "literal glob: optio/task-*",
+          "literal single quote: don't break",
+        ].join("\n");
+        const fakeClaude = join(dir, "claude");
+        const promptOut = join(dir, "prompt-out");
+        writeFileSync(
+          fakeClaude,
+          [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            'if [ "$1" != "-p" ]; then exit 64; fi',
+            `printf '%s' "$2" > ${JSON.stringify(promptOut)}`,
+          ].join("\n"),
+          { mode: 0o755 },
+        );
+        const script = [
+          "set -euo pipefail",
+          `export PATH=${JSON.stringify(dir)}:$PATH`,
+          ...buildAgentCommand("claude-code", { OPTIO_PROMPT: prompt }),
+        ].join("\n");
+
+        execFileSync("bash", ["-lc", script], { encoding: "utf8" });
+
+        expect(readFileSync(promptOut, "utf8")).toBe(prompt);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it("uses default coding max turns (250)", () => {
