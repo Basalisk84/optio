@@ -499,6 +499,12 @@ export async function updateTaskResult(id: string, resultSummary?: string, error
     .where(eq(tasks.id, id));
 }
 
+export async function updateTaskMetadata(id: string, patch: Record<string, unknown>) {
+  const existing = await getTask(id);
+  const merged = { ...((existing?.metadata as Record<string, unknown>) ?? {}), ...patch };
+  await db.update(tasks).set({ metadata: merged, updatedAt: new Date() }).where(eq(tasks.id, id));
+}
+
 export async function appendTaskLog(
   taskId: string,
   content: string,

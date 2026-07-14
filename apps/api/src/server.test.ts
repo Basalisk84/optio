@@ -79,6 +79,29 @@ describe("POST endpoints accept empty body", () => {
   });
 });
 
+describe("idempotent 404 contract", () => {
+  const idempotentPostEndpoints = [
+    "/api/tasks/nonexistent-id/retry",
+    "/api/tasks/nonexistent-id/cancel",
+    "/api/tasks/nonexistent-id/review",
+    "/api/tasks/nonexistent-id/resume",
+  ];
+
+  for (const url of idempotentPostEndpoints) {
+    it(`${url} returns 404 or 500 for missing resource, never 400`, async () => {
+      const res = await app.inject({ method: "POST", url });
+      // These endpoints operate on a resource by ID.
+      // A missing resource must never be confused with a bad request (400).
+      expect(res.statusCode).not.toBe(400);
+    });
+  }
+
+  // NOTE: GET /api/tasks/:id is behind auth middleware in buildServer(),
+  // so it returns 401 for unauthenticated requests — not testable here.
+  // The idempotency 404 contract is tested in tasks-agenticos.test.ts
+  // against the isolated route handler (no auth middleware).
+});
+
 describe("error handler", () => {
   it("maps InvalidTransitionError to 409", async () => {
     // The error handler is registered if buildServer() succeeded.

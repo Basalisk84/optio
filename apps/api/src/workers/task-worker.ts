@@ -20,6 +20,7 @@ import * as repoPool from "../services/repo-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { resolveSecretsForTask, retrieveSecret } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
+import { runPreflightChecks } from "../services/preflight-service.js";
 import { logger } from "../logger.js";
 
 type ConfiguredClaudeAuthMode = AdapterClaudeAuthMode | "oauth-token";
@@ -307,6 +308,22 @@ export function startTaskWorker() {
           agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
             JSON.stringify(agentConfig.setupFiles),
           ).toString("base64");
+        }
+
+        // ── Preflight checks ──────────────────────────────────────
+        const preflightResult = await runPreflightChecks(
+          adapter,
+          agentConfig,
+          task.repoUrl,
+          taskWorkspaceId,
+        );
+        await taskService.updateTaskMetadata(taskId, { preflight: preflightResult });
+        if (!preflightResult.passed) {
+          const missing = preflightResult.checks.secrets.missing;
+          throw new Error(
+            `Preflight failed: missing required secrets: ${missing.join(", ")}. ` +
+              `Configure them in Settings → Secrets before running this task.`,
+          );
         }
 
         // Resolve secrets (repo-scoped secrets override global ones)
