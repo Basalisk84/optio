@@ -33,7 +33,7 @@ Secrets stored in the database (e.g., API keys, tokens) are encrypted using **AE
 
 Agents (Claude Code, OpenAI Codex) run inside isolated Kubernetes pods with git worktrees. Each task gets its own worktree within a shared repo pod. The pods run with a dedicated ServiceAccount that has RBAC-scoped permissions limited to pod and exec operations within the Optio namespace.
 
-Claude Code runs with `--dangerously-skip-permissions`, which means the agent has full access to the filesystem and can execute arbitrary commands within the pod. This is necessary for the agent to function but means you should treat the pod environment as untrusted after agent execution.
+Claude Code runs with `--permission-mode dontAsk --allowedTools "Read,Edit,Write,Bash"`, which restricts the agent to a specific set of coding tools without interactive permission prompts. The agent can still execute commands via the Bash tool within the pod, so you should treat the pod environment as untrusted after agent execution.
 
 ## Production Deployment Recommendations
 

@@ -68,10 +68,19 @@ describe("buildAgentCommand", () => {
       const cmds = buildAgentCommand("claude-code", env);
 
       expect(cmds.some((c) => c.includes("claude -p"))).toBe(true);
-      expect(cmds.some((c) => c.includes("--dangerously-skip-permissions"))).toBe(true);
+      expect(cmds.some((c) => c.includes("--permission-mode dontAsk"))).toBe(true);
+      expect(cmds.some((c) => c.includes("--allowedTools"))).toBe(true);
+      expect(cmds.some((c) => c.includes("Read,Edit,Write,Bash"))).toBe(true);
       expect(cmds.some((c) => c.includes("--output-format stream-json"))).toBe(true);
       expect(cmds.some((c) => c.includes("--verbose"))).toBe(true);
       expect(cmds.some((c) => c.includes("--max-turns 250"))).toBe(true);
+    });
+
+    it("never includes --dangerously-skip-permissions", () => {
+      const env = { OPTIO_PROMPT: "Any task" };
+      const cmds = buildAgentCommand("claude-code", env);
+      const joined = cmds.join("\n");
+      expect(joined).not.toContain("dangerously-skip-permissions");
     });
 
     it("passes hostile prompt text to claude without shell execution", () => {

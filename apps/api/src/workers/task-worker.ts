@@ -912,7 +912,7 @@ export function buildAgentCommand(
       return [
         ...authSetup,
         `echo "[optio] Running Claude Code${opts?.isReview ? " (review)" : ""}..."`,
-        `claude -p ${shellSingleQuote(prompt)} --dangerously-skip-permissions --output-format stream-json --verbose --max-turns ${maxTurns}${resumeArg}`,
+        `claude -p ${shellSingleQuote(prompt)} --permission-mode dontAsk --allowedTools ${shellSingleQuote("Read,Edit,Write,Bash")} --output-format stream-json --verbose --max-turns ${maxTurns}${resumeArg}`,
       ];
     }
     case "codex":

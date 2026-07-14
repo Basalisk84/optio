@@ -185,7 +185,7 @@ The review system (`review-service.ts`) launches a review agent as a blocking su
    - Calls `repoPool.execTaskInRepoPod()` which execs a bash script:
      - `git fetch origin && git worktree add /workspace/tasks/{taskId}`
      - Decodes `OPTIO_SETUP_FILES` (base64 JSON) → writes `.optio/task.md` + auth helpers
-     - Runs `claude -p "..." --dangerously-skip-permissions --output-format stream-json --verbose --max-turns 50`
+     - Runs `claude -p "..." --permission-mode dontAsk --allowedTools "Read,Edit,Write,Bash" --output-format stream-json --verbose --max-turns 250`
      - Cleanup: `git worktree remove`
 4. Worker streams exec session stdout, parsing each NDJSON line via `agent-event-parser.ts`
 5. Session ID is captured from the first event and stored on the task
