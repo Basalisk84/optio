@@ -179,6 +179,7 @@ The review system (`review-service.ts`) launches a review agent as a blocking su
    - Applies per-repo Claude settings (model, context window, thinking, effort)
    - For review tasks: applies review-specific prompt, task file, and model overrides
    - Calls `adapter.buildContainerConfig()` which produces env vars + setup files
+   - **Preflight checks** (`preflight-service.ts`): validates required secrets are available by listing secret _names_ (never fetches values), calls `adapter.validateSecrets()`, persists the structured result in `tasks.metadata.preflight`, and fails fast with an actionable error if any are missing
    - For max-subscription auth: fetches `CLAUDE_CODE_OAUTH_TOKEN` from the auth service
    - Calls `repoPool.getOrCreateRepoPod()` — finds existing pod or creates one
    - Calls `repoPool.execTaskInRepoPod()` which execs a bash script:

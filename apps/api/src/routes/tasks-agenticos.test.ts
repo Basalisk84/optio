@@ -434,4 +434,18 @@ describe("AgenticOS task route idempotency", () => {
     expect(mockGetTaskByKey).toHaveBeenCalledWith("agenticos:run:task", null);
     await f.close();
   });
+
+  it("returns 404 JSON for missing idempotency key", async () => {
+    mockGetTaskByKey.mockResolvedValueOnce(null);
+    const f = await app();
+    const res = await f.inject({
+      method: "GET",
+      url: "/api/tasks/by-idempotency/nonexistent-key",
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body)).toEqual({ error: "Task not found" });
+    expect(mockGetTaskByKey).toHaveBeenCalledWith("nonexistent-key", null);
+    await f.close();
+  });
 });
